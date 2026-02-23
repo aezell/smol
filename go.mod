@@ -1,4 +1,4 @@
-module github.com/smol-tools/smol
+module github.com/aezell/smol
 
 go 1.25.1
 

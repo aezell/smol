@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/smol-tools/smol/cmd"
+	"github.com/aezell/smol/cmd"
 )
 
 func main() {

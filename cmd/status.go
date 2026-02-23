@@ -5,7 +5,7 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/smol-tools/smol/sprite"
+	"github.com/aezell/smol/sprite"
 	"github.com/spf13/cobra"
 )
 

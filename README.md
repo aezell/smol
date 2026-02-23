@@ -19,7 +19,7 @@ That's it. Your site is live.
 Requires [Go](https://go.dev/dl/) 1.21 or later.
 
 ```
-git clone https://github.com/smol-tools/smol.git
+git clone https://github.com/aezell/smol.git
 cd smol
 go build -o smol .
 sudo mv smol /usr/local/bin/
