@@ -44,72 +44,61 @@ the web server is running. If the site doesn't exist yet, it will be created.`,
 
 		name := deployTo
 
-		// Ensure the sprite exists, create it if not.
 		fmt.Printf("Preparing site %q...\n", name)
-		sprites, err := client.ListSprites()
+
+		// Check if the sprite exists; create it if not.
+		needsSetup := false
+		_, err = client.GetSprite(name)
 		if err != nil {
-			return fmt.Errorf("listing sprites: %w", err)
-		}
-		exists := false
-		for _, s := range sprites {
-			if s.Name == name {
-				exists = true
-				break
-			}
-		}
-		if !exists {
 			fmt.Printf("  Creating sprite...\n")
 			if err := client.CreateSprite(name); err != nil {
 				return fmt.Errorf("creating sprite: %w", err)
 			}
+			needsSetup = true
 		}
 
-		// Wait for sprite to be ready (it may be cold).
 		fmt.Printf("  Waiting for sprite...\n")
 		if err := client.WaitReady(name); err != nil {
 			return fmt.Errorf("waiting for sprite: %w", err)
 		}
 
-		// Create the web root.
+		// If the sprite existed, check if the web service is set up.
+		if !needsSetup {
+			services, _ := client.ListServices(name)
+			hasWeb := false
+			for _, s := range services {
+				if s.Name == "web" {
+					hasWeb = true
+					break
+				}
+			}
+			needsSetup = !hasWeb
+		}
+
+		// Upload files.
 		if _, err := client.Exec(name, "mkdir -p /srv/www"); err != nil {
 			return fmt.Errorf("creating web root: %w", err)
 		}
-
-		// Clean out old files.
-		fmt.Printf("  Cleaning old files...\n")
-		if _, err := client.Exec(name, "rm -rf /srv/www/*"); err != nil {
-			return fmt.Errorf("cleaning web root: %w", err)
+		if !needsSetup {
+			// Clean old files on update deploys.
+			if _, err := client.Exec(name, "rm -rf /srv/www/*"); err != nil {
+				return fmt.Errorf("cleaning web root: %w", err)
+			}
+		}
+		if err := uploadFiles(client, name, dir); err != nil {
+			return err
 		}
 
-		// Build tar archive of the directory.
-		fmt.Printf("  Uploading files...\n")
-		tarBuf, fileCount, err := createTarGz(dir)
-		if err != nil {
-			return fmt.Errorf("creating archive: %w", err)
-		}
-
-		// Upload the tar to the sprite.
-		if err := client.UploadTar(name, tarBuf, "/srv/www"); err != nil {
-			return fmt.Errorf("uploading files: %w", err)
-		}
-		fmt.Printf("  Uploaded %d files.\n", fileCount)
-
-		// Install and start the web server.
-		fmt.Printf("  Configuring web server...\n")
-		if err := ensureWebServer(client, name); err != nil {
-			return fmt.Errorf("configuring web server: %w", err)
-		}
-
-		// Make the site publicly accessible.
-		fmt.Printf("  Making site public...\n")
-		if err := client.MakePublic(name); err != nil {
-			return fmt.Errorf("making site public: %w", err)
+		// Set up Caddy and make public if this is a first-time setup.
+		if needsSetup {
+			if err := setupWebServer(client, name); err != nil {
+				return err
+			}
 		}
 
 		// Get the sprite info for the actual URL.
 		siteInfo, err := client.GetSprite(name)
 		if err != nil {
-			// Non-fatal — just use the generic URL.
 			fmt.Printf("\nSite %q deployed.\n", name)
 			fmt.Printf("Run 'smol open %s' to view it.\n", name)
 			return nil
@@ -119,6 +108,45 @@ the web server is running. If the site doesn't exist yet, it will be created.`,
 		fmt.Printf("Live at: %s\n", siteInfo.URL)
 		return nil
 	},
+}
+
+// setupWebServer installs Caddy, creates the service, and makes the site public.
+func setupWebServer(client *sprite.Client, name string) error {
+	fmt.Printf("  Installing Caddy...\n")
+	installCmd := "curl -sL 'https://caddyserver.com/api/download?os=linux&arch=amd64' -o /usr/local/bin/caddy && chmod +x /usr/local/bin/caddy"
+	if _, err := client.Exec(name, installCmd); err != nil {
+		return fmt.Errorf("installing caddy: %w", err)
+	}
+
+	if err := client.CreateService(name, "web", "caddy", []string{"file-server", "--root", "/srv/www", "--listen", ":8080"}, 8080); err != nil {
+		return fmt.Errorf("creating service: %w", err)
+	}
+
+	if err := client.StartService(name, "web"); err != nil {
+		return fmt.Errorf("starting service: %w", err)
+	}
+
+	fmt.Printf("  Making site public...\n")
+	if err := client.MakePublic(name); err != nil {
+		return fmt.Errorf("making site public: %w", err)
+	}
+
+	return nil
+}
+
+// uploadFiles tars a local directory and uploads it to /srv/www on the sprite.
+func uploadFiles(client *sprite.Client, name, dir string) error {
+	fmt.Printf("  Uploading files...\n")
+	tarBuf, fileCount, err := createTarGz(dir)
+	if err != nil {
+		return fmt.Errorf("creating archive: %w", err)
+	}
+
+	if err := client.UploadTar(name, tarBuf, "/srv/www"); err != nil {
+		return fmt.Errorf("uploading files: %w", err)
+	}
+	fmt.Printf("  Uploaded %d files.\n", fileCount)
+	return nil
 }
 
 func createTarGz(dir string) (*bytes.Buffer, int, error) {
@@ -190,34 +218,6 @@ func createTarGz(dir string) (*bytes.Buffer, int, error) {
 	}
 
 	return &buf, fileCount, nil
-}
-
-func ensureWebServer(client *sprite.Client, name string) error {
-	// Install Caddy — a single-binary web server with gzip, etags, and proper MIME types.
-	out, _ := client.Exec(name, "test -x /usr/local/bin/caddy && echo ok")
-	if out != "ok" {
-		fmt.Printf("  Installing Caddy...\n")
-		installCmd := "curl -sL 'https://caddyserver.com/api/download?os=linux&arch=amd64' -o /usr/local/bin/caddy && chmod +x /usr/local/bin/caddy"
-		if _, err := client.Exec(name, installCmd); err != nil {
-			return fmt.Errorf("installing caddy: %w", err)
-		}
-	}
-
-	// Remove any existing service so we can recreate it cleanly.
-	client.StopService(name, "web")
-	client.DeleteService(name, "web")
-
-	// Create the service.
-	if err := client.CreateService(name, "web", "caddy", []string{"file-server", "--root", "/srv/www", "--listen", ":8080"}, 8080); err != nil {
-		return fmt.Errorf("creating service: %w", err)
-	}
-
-	// Start the service.
-	if err := client.StartService(name, "web"); err != nil {
-		return fmt.Errorf("starting service: %w", err)
-	}
-
-	return nil
 }
 
 func init() {
