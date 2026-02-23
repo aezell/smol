@@ -14,9 +14,28 @@ That's it. Your site is live.
 
 ## Install
 
-### From source
+### Quick install (macOS and Linux)
 
-Requires [Go](https://go.dev/dl/) 1.21 or later.
+```
+curl -sL https://raw.githubusercontent.com/aezell/smol/main/install.sh | sh
+```
+
+This detects your OS and architecture, downloads the latest release, and
+installs to `/usr/local/bin`.
+
+### Download a binary
+
+Grab the latest release for your platform from the
+[releases page](https://github.com/aezell/smol/releases) and put it somewhere
+in your PATH.
+
+### With Go
+
+```
+go install github.com/aezell/smol@latest
+```
+
+### From source
 
 ```
 git clone https://github.com/aezell/smol.git
@@ -24,10 +43,6 @@ cd smol
 go build -o smol .
 sudo mv smol /usr/local/bin/
 ```
-
-### Pre-built binaries
-
-Coming soon.
 
 ## Quick start
 

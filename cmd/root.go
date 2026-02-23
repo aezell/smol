@@ -20,8 +20,12 @@ creating a sprite, uploading your files, and serving them to the world.`,
 	SilenceErrors: true,
 }
 
+// Version is set at build time via ldflags.
+var Version = "dev"
+
 // Execute runs the root command.
 func Execute() error {
+	rootCmd.Version = Version
 	return rootCmd.Execute()
 }
 
